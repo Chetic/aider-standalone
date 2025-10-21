@@ -1,0 +1,96 @@
+name: Build standalone aider
+
+on:
+  workflow_dispatch:
+    inputs:
+      aider_version:
+        description: "Optional aider version (defaults to latest PyPI release)"
+        required: false
+        type: string
+  schedule:
+    - cron: '0 6 * * *'
+
+env:
+  PYTHONUNBUFFERED: '1'
+
+jobs:
+  build:
+    name: Build standalone release
+    runs-on: ubuntu-latest
+    container:
+      image: registry.access.redhat.com/ubi9/python-311:latest
+      options: --user 0
+    steps:
+      - name: Install system dependencies
+        run: |
+          dnf install -y git gcc redhat-rpm-config findutils openssl-devel libffi-devel
+          dnf install -y python3-devel || dnf install -y python3.11-devel
+          dnf clean all
+
+      - uses: actions/checkout@v4
+
+      - name: Resolve aider version
+        id: aider_version
+        run: |
+          REQUESTED="${{ github.event.inputs.aider_version || '' }}"
+          if [ -n "$REQUESTED" ]; then
+            python scripts/fetch_aider_release.py --requested "$REQUESTED" --github-output "$GITHUB_OUTPUT"
+          else
+            python scripts/fetch_aider_release.py --github-output "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute build metadata
+        id: versioning
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          AIDER_VERSION: ${{ steps.aider_version.outputs.aider_version }}
+        run: |
+          mkdir -p build
+          python scripts/compute_version.py \
+            --aider-version "$AIDER_VERSION" \
+            --output build/version.json \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Build standalone executable
+        env:
+          AIDER_VERSION: ${{ steps.aider_version.outputs.aider_version }}
+          BUILD_NUMBER: ${{ steps.versioning.outputs.build_number }}
+        run: |
+          python scripts/build_standalone.py \
+            --aider-version "$AIDER_VERSION" \
+            --build-number "$BUILD_NUMBER" \
+            --output-dir build/artifacts \
+            --metadata build/manifest.json
+
+      - name: Smoke test executable
+        env:
+          BUILD_NUMBER: ${{ steps.versioning.outputs.build_number }}
+        run: |
+          build/artifacts/aider-standalone-build${BUILD_NUMBER} --help >/dev/null
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.versioning.outputs.artifact_name }}
+          path: |
+            build/manifest.json
+            build/artifacts/aider-standalone-build${{ steps.versioning.outputs.build_number }}
+            build/artifacts/requirements.lock
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.versioning.outputs.tag_name }}
+          name: Standalone aider ${{ steps.versioning.outputs.tag_name }}
+          body: |
+            ## Standalone aider release
+            * Aider version: ${{ steps.aider_version.outputs.aider_version }}
+            * Build number: ${{ steps.versioning.outputs.build_number }}
+            * Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          files: |
+            build/manifest.json
+            build/artifacts/aider-standalone-build${{ steps.versioning.outputs.build_number }}
+            build/artifacts/requirements.lock
