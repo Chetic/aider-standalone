@@ -98,6 +98,16 @@ if __name__ == "__main__":
             "litellm",
             "--collect-submodules",
             "litellm",
+            "--collect-data",
+            "tiktoken",
+            "--collect-data",
+            "tiktoken_ext",
+            "--collect-submodules",
+            "tiktoken_ext",
+            "--collect-data",
+            "tiktoken_ext.openai_public",
+            "--collect-submodules",
+            "tiktoken_ext.openai_public",
             str(launcher_path),
         ]
         run(pyinstaller_cmd, cwd=tmp_path)
