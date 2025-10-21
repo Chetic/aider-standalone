@@ -25,24 +25,6 @@ def run(
     subprocess.run(cmd, check=True, env=env, cwd=str(cwd) if cwd else None)
 
 
-def run_output(
-    cmd: list[str],
-    *,
-    env: Dict[str, str] | None = None,
-    cwd: Path | None = None,
-) -> str:
-    print(f":: Running: {' '.join(cmd)}")
-    result = subprocess.run(
-        cmd,
-        check=True,
-        env=env,
-        cwd=str(cwd) if cwd else None,
-        text=True,
-        capture_output=True,
-    )
-    return result.stdout
-
-
 def sha256sum(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -87,18 +69,16 @@ def build_standalone(aider_version: str, build_number: int, output_dir: Path) ->
         binary_name = f"aider-standalone"
         dist_dir = tmp_path / "dist"
 
-        aider_entrypoint = (
-            run_output(
-                [
-                    str(venv_python),
-                    "-c",
-                    (
-                        "import pathlib, aider.__main__ as mod; "
-                        "print(pathlib.Path(mod.__file__).resolve())"
-                    ),
-                ]
-            )
-            .strip()
+        launcher_path = tmp_path / "launch_aider.py"
+        launcher_path.write_text(
+            """\
+from aider.__main__ import main
+
+
+if __name__ == "__main__":
+    main()
+""",
+            encoding="utf-8",
         )
 
         pyinstaller_cmd = [
@@ -112,7 +92,7 @@ def build_standalone(aider_version: str, build_number: int, output_dir: Path) ->
             "--onefile",
             "--collect-all",
             "aider",
-            aider_entrypoint,
+            str(launcher_path),
         ]
         run(pyinstaller_cmd, cwd=tmp_path)
 
