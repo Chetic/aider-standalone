@@ -61,4 +61,6 @@ input. If omitted, the workflow builds the latest aider release.
 
 After downloading the executable, compare its SHA-256 checksum against the value recorded
 in the manifest JSON. Run the binary with `--help` on a RHEL 9 system to ensure it
-operates as expected.
+operates as expected. The binary now extracts its temporary runtime files into a
+`.aider-standalone-tmp` directory alongside the executable so that it continues to work on
+systems where `/tmp` is mounted with the `noexec` flag.
