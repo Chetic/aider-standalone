@@ -90,6 +90,8 @@ if __name__ == "__main__":
             "--name",
             binary_name,
             "--onefile",
+            "--runtime-tmpdir",
+            "./.aider-standalone-tmp",
             "--collect-all",
             "aider",
             str(launcher_path),
