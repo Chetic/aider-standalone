@@ -22,9 +22,9 @@ jobs:
     steps:
       - name: Install system dependencies
         run: |
-          microdnf install -y git gcc python3-devel redhat-rpm-config findutils \
-            openssl-devel libffi-devel \
-            && microdnf clean all
+          dnf install -y git gcc redhat-rpm-config findutils openssl-devel libffi-devel
+          dnf install -y python3-devel || dnf install -y python3.11-devel
+          dnf clean all
 
       - uses: actions/checkout@v4
 
