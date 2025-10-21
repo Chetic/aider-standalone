@@ -15,9 +15,32 @@ from pathlib import Path
 from typing import Dict
 
 
-def run(cmd: list[str], *, env: Dict[str, str] | None = None, cwd: Path | None = None) -> None:
+def run(
+    cmd: list[str],
+    *,
+    env: Dict[str, str] | None = None,
+    cwd: Path | None = None,
+) -> None:
     print(f":: Running: {' '.join(cmd)}")
     subprocess.run(cmd, check=True, env=env, cwd=str(cwd) if cwd else None)
+
+
+def run_output(
+    cmd: list[str],
+    *,
+    env: Dict[str, str] | None = None,
+    cwd: Path | None = None,
+) -> str:
+    print(f":: Running: {' '.join(cmd)}")
+    result = subprocess.run(
+        cmd,
+        check=True,
+        env=env,
+        cwd=str(cwd) if cwd else None,
+        text=True,
+        capture_output=True,
+    )
+    return result.stdout
 
 
 def sha256sum(path: Path) -> str:
@@ -64,6 +87,20 @@ def build_standalone(aider_version: str, build_number: int, output_dir: Path) ->
         binary_name = f"aider-standalone"
         dist_dir = tmp_path / "dist"
 
+        aider_entrypoint = (
+            run_output(
+                [
+                    str(venv_python),
+                    "-c",
+                    (
+                        "import pathlib, aider.__main__ as mod; "
+                        "print(pathlib.Path(mod.__file__).resolve())"
+                    ),
+                ]
+            )
+            .strip()
+        )
+
         pyinstaller_cmd = [
             str(venv_python),
             "-m",
@@ -75,8 +112,7 @@ def build_standalone(aider_version: str, build_number: int, output_dir: Path) ->
             "--onefile",
             "--collect-all",
             "aider",
-            "-m",
-            "aider.__main__",
+            aider_entrypoint,
         ]
         run(pyinstaller_cmd, cwd=tmp_path)
 
