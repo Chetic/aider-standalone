@@ -48,6 +48,10 @@ schedule. It performs the following steps:
 4. Run a smoke test (`--help`) to verify the artifact starts.
 5. Upload the build outputs and publish a GitHub release tagged with the computed version.
 
+> **Note:** The workflow requires the default `GITHUB_TOKEN` to have `contents: write`
+> permissions so it can create the release. Grant this permission at either the workflow
+> or repository level if it has been restricted.
+
 ## Triggering a Build Manually
 
 Use the **Run workflow** button in GitHub Actions and optionally provide an `aider_version`
