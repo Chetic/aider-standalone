@@ -94,6 +94,10 @@ if __name__ == "__main__":
             "./.aider-standalone-tmp",
             "--collect-all",
             "aider",
+            "--collect-data",
+            "litellm",
+            "--collect-submodules",
+            "litellm",
             str(launcher_path),
         ]
         run(pyinstaller_cmd, cwd=tmp_path)
