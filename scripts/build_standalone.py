@@ -50,7 +50,7 @@ def build_standalone(aider_version: str, build_number: int, output_dir: Path) ->
         requirements_lock = tmp_path / "requirements.lock"
         requirements = [
             f"aider-chat=={aider_version}",
-            "py-tree-sitter-languages",
+            "tree-sitter-languages",
         ]
         requirements_in.write_text("\n".join(requirements) + "\n", encoding="utf-8")
 
