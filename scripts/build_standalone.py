@@ -48,7 +48,11 @@ def build_standalone(aider_version: str, build_number: int, output_dir: Path) ->
 
         requirements_in = tmp_path / "requirements.in"
         requirements_lock = tmp_path / "requirements.lock"
-        requirements_in.write_text(f"aider-chat=={aider_version}\n", encoding="utf-8")
+        requirements = [
+            f"aider-chat=={aider_version}",
+            "py-tree-sitter-languages",
+        ]
+        requirements_in.write_text("\n".join(requirements) + "\n", encoding="utf-8")
 
         run(
             [
@@ -108,6 +112,12 @@ if __name__ == "__main__":
             "tiktoken_ext.openai_public",
             "--collect-submodules",
             "tiktoken_ext.openai_public",
+            "--collect-data",
+            "tree_sitter_languages",
+            "--collect-submodules",
+            "tree_sitter_languages",
+            "--collect-binaries",
+            "tree_sitter_languages",
             str(launcher_path),
         ]
         run(pyinstaller_cmd, cwd=tmp_path)
