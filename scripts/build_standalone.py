@@ -89,16 +89,24 @@ def build_standalone(
         dist_dir = tmp_path / "dist"
 
         launcher_path = tmp_path / "launch_aider.py"
-        launcher_path.write_text(
-            """\
+        # aider-ce uses aider.main:main, aider-chat uses aider.__main__:main
+        if variant == "aider-ce":
+            launcher_code = """\
+from aider.main import main
+
+
+if __name__ == "__main__":
+    main()
+"""
+        else:
+            launcher_code = """\
 from aider.__main__ import main
 
 
 if __name__ == "__main__":
     main()
-""",
-            encoding="utf-8",
-        )
+"""
+        launcher_path.write_text(launcher_code, encoding="utf-8")
 
         pyinstaller_cmd = [
             str(venv_python),
