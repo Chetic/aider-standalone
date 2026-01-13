@@ -10,8 +10,11 @@ on:
         description: "Optional aider version (defaults to latest PyPI release)"
         required: false
         type: string
-  schedule:
-    - cron: '0 6 * * *'
+      force_rebuild:
+        description: "Force rebuild even if release exists for this version"
+        required: false
+        type: boolean
+        default: false
 
 env:
   PYTHONUNBUFFERED: '1'
@@ -42,7 +45,27 @@ jobs:
             python scripts/fetch_aider_release.py --github-output "$GITHUB_OUTPUT"
           fi
 
+      - name: Check for existing release
+        id: check_existing
+        if: ${{ github.event.inputs.force_rebuild != 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AIDER_VERSION: ${{ steps.aider_version.outputs.aider_version }}
+        run: |
+          if gh release list --limit 100 | grep -q "standalone-v${AIDER_VERSION}-build"; then
+            echo "Release already exists for aider v${AIDER_VERSION}"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip if release exists
+        if: ${{ steps.check_existing.outputs.skip == 'true' }}
+        run: |
+          echo "::notice::Skipping build - release already exists for aider v${{ steps.aider_version.outputs.aider_version }}. Use force_rebuild=true to override."
+
       - name: Compute build metadata
+        if: ${{ steps.check_existing.outputs.skip != 'true' }}
         id: versioning
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -56,6 +79,7 @@ jobs:
             --github-output "$GITHUB_OUTPUT"
 
       - name: Build standalone executable
+        if: ${{ steps.check_existing.outputs.skip != 'true' }}
         env:
           AIDER_VERSION: ${{ steps.aider_version.outputs.aider_version }}
           BUILD_NUMBER: ${{ steps.versioning.outputs.build_number }}
@@ -67,12 +91,14 @@ jobs:
             --metadata build/manifest.json
 
       - name: Smoke test executable
+        if: ${{ steps.check_existing.outputs.skip != 'true' }}
         env:
           BUILD_NUMBER: ${{ steps.versioning.outputs.build_number }}
         run: |
           build/artifacts/aider-standalone-build${BUILD_NUMBER} --help >/dev/null
 
       - name: Upload artifacts
+        if: ${{ steps.check_existing.outputs.skip != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.versioning.outputs.artifact_name }}
@@ -82,6 +108,7 @@ jobs:
             build/artifacts/requirements.lock
 
       - name: Publish GitHub release
+        if: ${{ steps.check_existing.outputs.skip != 'true' }}
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
