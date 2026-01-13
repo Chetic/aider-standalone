@@ -15,6 +15,11 @@ on:
         required: false
         type: boolean
         default: false
+      use_main_branch:
+        description: "Build from aider main branch instead of PyPI release"
+        required: false
+        type: boolean
+        default: false
 
 env:
   PYTHONUNBUFFERED: '1'
@@ -35,8 +40,22 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Resolve aider version
+      - name: Clone aider main branch
+        id: clone_aider
+        if: ${{ github.event.inputs.use_main_branch == 'true' }}
+        run: |
+          git clone --depth 1 https://github.com/Aider-AI/aider.git aider-source
+          cd aider-source
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+          BUILD_DATE=$(date +%Y%m%d)
+          echo "commit_hash=${COMMIT_HASH}" >> "$GITHUB_OUTPUT"
+          echo "build_date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
+          echo "aider_source_path=$(pwd)" >> "$GITHUB_OUTPUT"
+          echo "Cloned aider main branch at commit ${COMMIT_HASH}"
+
+      - name: Resolve aider version (PyPI)
         id: aider_version
+        if: ${{ github.event.inputs.use_main_branch != 'true' }}
         run: |
           REQUESTED="${{ github.event.inputs.aider_version || '' }}"
           if [ -n "$REQUESTED" ]; then
@@ -45,15 +64,31 @@ jobs:
             python scripts/fetch_aider_release.py --github-output "$GITHUB_OUTPUT"
           fi
 
+      - name: Set aider version (main branch)
+        id: aider_version_main
+        if: ${{ github.event.inputs.use_main_branch == 'true' }}
+        run: |
+          VERSION="main-${{ steps.clone_aider.outputs.build_date }}-${{ steps.clone_aider.outputs.commit_hash }}"
+          echo "aider_version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Using aider main branch version: ${VERSION}"
+
       - name: Check for existing release
         id: check_existing
         if: ${{ github.event.inputs.force_rebuild != 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AIDER_VERSION: ${{ steps.aider_version.outputs.aider_version }}
+          USE_MAIN_BRANCH: ${{ github.event.inputs.use_main_branch }}
+          AIDER_VERSION: ${{ github.event.inputs.use_main_branch == 'true' && steps.aider_version_main.outputs.aider_version || steps.aider_version.outputs.aider_version }}
+          BUILD_DATE: ${{ steps.clone_aider.outputs.build_date }}
+          COMMIT_HASH: ${{ steps.clone_aider.outputs.commit_hash }}
         run: |
-          if gh release list --limit 100 | grep -q "standalone-v${AIDER_VERSION}-build"; then
-            echo "Release already exists for aider v${AIDER_VERSION}"
+          if [ "$USE_MAIN_BRANCH" = "true" ]; then
+            PATTERN="standalone-main-${BUILD_DATE}-${COMMIT_HASH}-build"
+          else
+            PATTERN="standalone-v${AIDER_VERSION}-build"
+          fi
+          if gh release list --limit 100 | grep -q "$PATTERN"; then
+            echo "Release already exists for aider ${AIDER_VERSION}"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -61,8 +96,10 @@ jobs:
 
       - name: Skip if release exists
         if: ${{ steps.check_existing.outputs.skip == 'true' }}
+        env:
+          AIDER_VERSION: ${{ github.event.inputs.use_main_branch == 'true' && steps.aider_version_main.outputs.aider_version || steps.aider_version.outputs.aider_version }}
         run: |
-          echo "::notice::Skipping build - release already exists for aider v${{ steps.aider_version.outputs.aider_version }}. Use force_rebuild=true to override."
+          echo "::notice::Skipping build - release already exists for aider ${AIDER_VERSION}. Use force_rebuild=true to override."
 
       - name: Compute build metadata
         if: ${{ steps.check_existing.outputs.skip != 'true' }}
@@ -70,25 +107,49 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          AIDER_VERSION: ${{ steps.aider_version.outputs.aider_version }}
+          AIDER_VERSION: ${{ github.event.inputs.use_main_branch == 'true' && steps.aider_version_main.outputs.aider_version || steps.aider_version.outputs.aider_version }}
+          USE_MAIN_BRANCH: ${{ github.event.inputs.use_main_branch }}
+          BUILD_DATE: ${{ steps.clone_aider.outputs.build_date }}
+          COMMIT_HASH: ${{ steps.clone_aider.outputs.commit_hash }}
         run: |
           mkdir -p build
-          python scripts/compute_version.py \
-            --aider-version "$AIDER_VERSION" \
-            --output build/version.json \
-            --github-output "$GITHUB_OUTPUT"
+          if [ "$USE_MAIN_BRANCH" = "true" ]; then
+            python scripts/compute_version.py \
+              --aider-version "$AIDER_VERSION" \
+              --source-type main \
+              --date "$BUILD_DATE" \
+              --commit-hash "$COMMIT_HASH" \
+              --output build/version.json \
+              --github-output "$GITHUB_OUTPUT"
+          else
+            python scripts/compute_version.py \
+              --aider-version "$AIDER_VERSION" \
+              --output build/version.json \
+              --github-output "$GITHUB_OUTPUT"
+          fi
 
       - name: Build standalone executable
         if: ${{ steps.check_existing.outputs.skip != 'true' }}
         env:
-          AIDER_VERSION: ${{ steps.aider_version.outputs.aider_version }}
+          AIDER_VERSION: ${{ github.event.inputs.use_main_branch == 'true' && steps.aider_version_main.outputs.aider_version || steps.aider_version.outputs.aider_version }}
           BUILD_NUMBER: ${{ steps.versioning.outputs.build_number }}
+          USE_MAIN_BRANCH: ${{ github.event.inputs.use_main_branch }}
+          AIDER_SOURCE_PATH: ${{ steps.clone_aider.outputs.aider_source_path }}
         run: |
-          python scripts/build_standalone.py \
-            --aider-version "$AIDER_VERSION" \
-            --build-number "$BUILD_NUMBER" \
-            --output-dir build/artifacts \
-            --metadata build/manifest.json
+          if [ "$USE_MAIN_BRANCH" = "true" ]; then
+            python scripts/build_standalone.py \
+              --aider-version "$AIDER_VERSION" \
+              --build-number "$BUILD_NUMBER" \
+              --output-dir build/artifacts \
+              --metadata build/manifest.json \
+              --aider-source-path "$AIDER_SOURCE_PATH"
+          else
+            python scripts/build_standalone.py \
+              --aider-version "$AIDER_VERSION" \
+              --build-number "$BUILD_NUMBER" \
+              --output-dir build/artifacts \
+              --metadata build/manifest.json
+          fi
 
       - name: Smoke test executable
         if: ${{ steps.check_existing.outputs.skip != 'true' }}
@@ -107,8 +168,8 @@ jobs:
             build/artifacts/aider-standalone-build${{ steps.versioning.outputs.build_number }}
             build/artifacts/requirements.lock
 
-      - name: Publish GitHub release
-        if: ${{ steps.check_existing.outputs.skip != 'true' }}
+      - name: Publish GitHub release (PyPI)
+        if: ${{ steps.check_existing.outputs.skip != 'true' && github.event.inputs.use_main_branch != 'true' }}
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -118,6 +179,26 @@ jobs:
           body: |
             ## Standalone aider release
             * Aider version: ${{ steps.aider_version.outputs.aider_version }}
+            * Build number: ${{ steps.versioning.outputs.build_number }}
+            * Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          files: |
+            build/manifest.json
+            build/artifacts/aider-standalone-build${{ steps.versioning.outputs.build_number }}
+            build/artifacts/requirements.lock
+
+      - name: Publish GitHub release (main branch)
+        if: ${{ steps.check_existing.outputs.skip != 'true' && github.event.inputs.use_main_branch == 'true' }}
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.versioning.outputs.tag_name }}
+          name: Standalone aider ${{ steps.versioning.outputs.tag_name }}
+          body: |
+            ## Standalone aider release (main branch)
+            * Aider source: main branch
+            * Commit: [${{ steps.clone_aider.outputs.commit_hash }}](https://github.com/Aider-AI/aider/commit/${{ steps.clone_aider.outputs.commit_hash }})
+            * Build date: ${{ steps.clone_aider.outputs.build_date }}
             * Build number: ${{ steps.versioning.outputs.build_number }}
             * Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           files: |

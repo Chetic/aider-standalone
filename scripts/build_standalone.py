@@ -33,7 +33,12 @@ def sha256sum(path: Path) -> str:
     return digest.hexdigest()
 
 
-def build_standalone(aider_version: str, build_number: int, output_dir: Path) -> Dict[str, str]:
+def build_standalone(
+    aider_version: str,
+    build_number: int,
+    output_dir: Path,
+    aider_source_path: Path | None = None,
+) -> Dict[str, str]:
     output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="aider-standalone-") as tmp:
         tmp_path = Path(tmp)
@@ -48,10 +53,17 @@ def build_standalone(aider_version: str, build_number: int, output_dir: Path) ->
 
         requirements_in = tmp_path / "requirements.in"
         requirements_lock = tmp_path / "requirements.lock"
-        requirements = [
-            f"aider-chat=={aider_version}",
-            "tree-sitter-languages",
-        ]
+
+        if aider_source_path:
+            # Install aider from local source first
+            run([str(venv_pip), "install", str(aider_source_path)])
+            # Only compile tree-sitter-languages with hashes
+            requirements = ["tree-sitter-languages"]
+        else:
+            requirements = [
+                f"aider-chat=={aider_version}",
+                "tree-sitter-languages",
+            ]
         requirements_in.write_text("\n".join(requirements) + "\n", encoding="utf-8")
 
         run(
@@ -147,9 +159,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--build-number", type=int, required=True)
     parser.add_argument("--output-dir", type=Path, default=Path("build/artifacts"))
     parser.add_argument("--metadata", type=Path, required=True, help="Path to metadata JSON file")
+    parser.add_argument(
+        "--aider-source-path",
+        type=Path,
+        help="Path to local aider source (for main branch builds)",
+    )
     args = parser.parse_args(argv)
 
-    metadata = build_standalone(args.aider_version, args.build_number, args.output_dir)
+    metadata = build_standalone(
+        args.aider_version,
+        args.build_number,
+        args.output_dir,
+        aider_source_path=args.aider_source_path,
+    )
 
     manifest = {
         "aider_version": args.aider_version,
