@@ -62,7 +62,11 @@ def build_standalone(
             requirements = ["tree-sitter-languages"]
         else:
             # Use correct PyPI package based on variant
-            package_name = "aider-ce" if variant == "aider-ce" else "aider-chat"
+            # aider-ce PyPI package is deprecated, use cecli-dev instead
+            if variant == "aider-ce":
+                package_name = "cecli-dev"
+            else:
+                package_name = "aider-chat"
             requirements = [
                 f"{package_name}=={aider_version}",
                 "tree-sitter-languages",
@@ -89,16 +93,33 @@ def build_standalone(
         dist_dir = tmp_path / "dist"
 
         launcher_path = tmp_path / "launch_aider.py"
-        # aider-ce uses aider.main:main, aider-chat uses aider.__main__:main
+        # Determine module name and entry point based on variant and source
+        # - aider-ce from source (GitHub): uses 'aider' module with aider.main:main
+        # - aider-ce from PyPI (cecli-dev): uses 'cecli' module with cecli.main:main
+        # - aider-chat: uses 'aider' module with aider.__main__:main
         if variant == "aider-ce":
-            launcher_code = """\
+            if aider_source_path:
+                # Building from source - uses aider module
+                module_name = "aider"
+                launcher_code = """\
 from aider.main import main
 
 
 if __name__ == "__main__":
     main()
 """
+            else:
+                # Building from PyPI (cecli-dev) - uses cecli module
+                module_name = "cecli"
+                launcher_code = """\
+from cecli.main import main
+
+
+if __name__ == "__main__":
+    main()
+"""
         else:
+            module_name = "aider"
             launcher_code = """\
 from aider.__main__ import main
 
@@ -120,7 +141,7 @@ if __name__ == "__main__":
             "--runtime-tmpdir",
             "./.aider-standalone-tmp",
             "--collect-all",
-            "aider",
+            module_name,
             "--collect-data",
             "litellm",
             "--collect-submodules",

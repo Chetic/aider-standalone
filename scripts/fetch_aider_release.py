@@ -12,7 +12,8 @@ from typing import Any, Dict
 
 PYPI_URLS = {
     "aider-chat": "https://pypi.org/pypi/aider-chat/json",
-    "aider-ce": "https://pypi.org/pypi/aider-ce/json",
+    # aider-ce is deprecated, use cecli-dev instead for PyPI builds
+    "aider-ce": "https://pypi.org/pypi/cecli-dev/json",
 }
 DEFAULT_VARIANT = "aider-chat"
 
