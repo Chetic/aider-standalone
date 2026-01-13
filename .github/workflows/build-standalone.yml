@@ -20,6 +20,14 @@ on:
         required: false
         type: boolean
         default: false
+      variant:
+        description: "Which aider variant to build"
+        required: false
+        type: choice
+        options:
+          - aider-chat
+          - aider-ce
+        default: aider-chat
 
 env:
   PYTHONUNBUFFERED: '1'
@@ -44,24 +52,31 @@ jobs:
         id: clone_aider
         if: ${{ github.event.inputs.use_main_branch == 'true' }}
         run: |
-          git clone --depth 1 https://github.com/Aider-AI/aider.git aider-source
+          VARIANT="${{ github.event.inputs.variant || 'aider-chat' }}"
+          if [ "$VARIANT" = "aider-ce" ]; then
+            REPO_URL="https://github.com/ErichBSchulz/aider-ce.git"
+          else
+            REPO_URL="https://github.com/Aider-AI/aider.git"
+          fi
+          git clone --depth 1 "$REPO_URL" aider-source
           cd aider-source
           COMMIT_HASH=$(git rev-parse --short HEAD)
           BUILD_DATE=$(date +%Y%m%d)
           echo "commit_hash=${COMMIT_HASH}" >> "$GITHUB_OUTPUT"
           echo "build_date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
           echo "aider_source_path=$(pwd)" >> "$GITHUB_OUTPUT"
-          echo "Cloned aider main branch at commit ${COMMIT_HASH}"
+          echo "Cloned $VARIANT main branch at commit ${COMMIT_HASH}"
 
       - name: Resolve aider version (PyPI)
         id: aider_version
         if: ${{ github.event.inputs.use_main_branch != 'true' }}
         run: |
           REQUESTED="${{ github.event.inputs.aider_version || '' }}"
+          VARIANT="${{ github.event.inputs.variant || 'aider-chat' }}"
           if [ -n "$REQUESTED" ]; then
-            python scripts/fetch_aider_release.py --requested "$REQUESTED" --github-output "$GITHUB_OUTPUT"
+            python scripts/fetch_aider_release.py --requested "$REQUESTED" --variant "$VARIANT" --github-output "$GITHUB_OUTPUT"
           else
-            python scripts/fetch_aider_release.py --github-output "$GITHUB_OUTPUT"
+            python scripts/fetch_aider_release.py --variant "$VARIANT" --github-output "$GITHUB_OUTPUT"
           fi
 
       - name: Set aider version (main branch)
@@ -78,17 +93,23 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           USE_MAIN_BRANCH: ${{ github.event.inputs.use_main_branch }}
+          VARIANT: ${{ github.event.inputs.variant || 'aider-chat' }}
           AIDER_VERSION: ${{ github.event.inputs.use_main_branch == 'true' && steps.aider_version_main.outputs.aider_version || steps.aider_version.outputs.aider_version }}
           BUILD_DATE: ${{ steps.clone_aider.outputs.build_date }}
           COMMIT_HASH: ${{ steps.clone_aider.outputs.commit_hash }}
         run: |
-          if [ "$USE_MAIN_BRANCH" = "true" ]; then
-            PATTERN="standalone-main-${BUILD_DATE}-${COMMIT_HASH}-build"
+          if [ "$VARIANT" = "aider-ce" ]; then
+            PREFIX="standalone-ce"
           else
-            PATTERN="standalone-v${AIDER_VERSION}-build"
+            PREFIX="standalone"
+          fi
+          if [ "$USE_MAIN_BRANCH" = "true" ]; then
+            PATTERN="${PREFIX}-main-${BUILD_DATE}-${COMMIT_HASH}-build"
+          else
+            PATTERN="${PREFIX}-v${AIDER_VERSION}-build"
           fi
           if gh release list --limit 100 | grep -q "$PATTERN"; then
-            echo "Release already exists for aider ${AIDER_VERSION}"
+            echo "Release already exists for $VARIANT ${AIDER_VERSION}"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -109,6 +130,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           AIDER_VERSION: ${{ github.event.inputs.use_main_branch == 'true' && steps.aider_version_main.outputs.aider_version || steps.aider_version.outputs.aider_version }}
           USE_MAIN_BRANCH: ${{ github.event.inputs.use_main_branch }}
+          VARIANT: ${{ github.event.inputs.variant || 'aider-chat' }}
           BUILD_DATE: ${{ steps.clone_aider.outputs.build_date }}
           COMMIT_HASH: ${{ steps.clone_aider.outputs.commit_hash }}
         run: |
@@ -117,6 +139,7 @@ jobs:
             python scripts/compute_version.py \
               --aider-version "$AIDER_VERSION" \
               --source-type main \
+              --variant "$VARIANT" \
               --date "$BUILD_DATE" \
               --commit-hash "$COMMIT_HASH" \
               --output build/version.json \
@@ -124,6 +147,7 @@ jobs:
           else
             python scripts/compute_version.py \
               --aider-version "$AIDER_VERSION" \
+              --variant "$VARIANT" \
               --output build/version.json \
               --github-output "$GITHUB_OUTPUT"
           fi
@@ -134,12 +158,14 @@ jobs:
           AIDER_VERSION: ${{ github.event.inputs.use_main_branch == 'true' && steps.aider_version_main.outputs.aider_version || steps.aider_version.outputs.aider_version }}
           BUILD_NUMBER: ${{ steps.versioning.outputs.build_number }}
           USE_MAIN_BRANCH: ${{ github.event.inputs.use_main_branch }}
+          VARIANT: ${{ github.event.inputs.variant || 'aider-chat' }}
           AIDER_SOURCE_PATH: ${{ steps.clone_aider.outputs.aider_source_path }}
         run: |
           if [ "$USE_MAIN_BRANCH" = "true" ]; then
             python scripts/build_standalone.py \
               --aider-version "$AIDER_VERSION" \
               --build-number "$BUILD_NUMBER" \
+              --variant "$VARIANT" \
               --output-dir build/artifacts \
               --metadata build/manifest.json \
               --aider-source-path "$AIDER_SOURCE_PATH"
@@ -147,6 +173,7 @@ jobs:
             python scripts/build_standalone.py \
               --aider-version "$AIDER_VERSION" \
               --build-number "$BUILD_NUMBER" \
+              --variant "$VARIANT" \
               --output-dir build/artifacts \
               --metadata build/manifest.json
           fi
@@ -175,10 +202,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.versioning.outputs.tag_name }}
-          name: Standalone aider ${{ steps.versioning.outputs.tag_name }}
+          name: Standalone ${{ github.event.inputs.variant || 'aider-chat' }} ${{ steps.versioning.outputs.tag_name }}
           body: |
-            ## Standalone aider release
-            * Aider version: ${{ steps.aider_version.outputs.aider_version }}
+            ## Standalone ${{ github.event.inputs.variant || 'aider-chat' }} release
+            * Variant: ${{ github.event.inputs.variant || 'aider-chat' }}
+            * Version: ${{ steps.aider_version.outputs.aider_version }}
             * Build number: ${{ steps.versioning.outputs.build_number }}
             * Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           files: |
@@ -191,13 +219,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VARIANT: ${{ github.event.inputs.variant || 'aider-chat' }}
         with:
           tag_name: ${{ steps.versioning.outputs.tag_name }}
-          name: Standalone aider ${{ steps.versioning.outputs.tag_name }}
+          name: Standalone ${{ github.event.inputs.variant || 'aider-chat' }} ${{ steps.versioning.outputs.tag_name }}
           body: |
-            ## Standalone aider release (main branch)
-            * Aider source: main branch
-            * Commit: [${{ steps.clone_aider.outputs.commit_hash }}](https://github.com/Aider-AI/aider/commit/${{ steps.clone_aider.outputs.commit_hash }})
+            ## Standalone ${{ github.event.inputs.variant || 'aider-chat' }} release (main branch)
+            * Variant: ${{ github.event.inputs.variant || 'aider-chat' }}
+            * Source: main branch
+            * Commit: ${{ steps.clone_aider.outputs.commit_hash }}
             * Build date: ${{ steps.clone_aider.outputs.build_date }}
             * Build number: ${{ steps.versioning.outputs.build_number }}
             * Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

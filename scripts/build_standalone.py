@@ -38,6 +38,7 @@ def build_standalone(
     build_number: int,
     output_dir: Path,
     aider_source_path: Path | None = None,
+    variant: str = "aider-chat",
 ) -> Dict[str, str]:
     output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="aider-standalone-") as tmp:
@@ -60,8 +61,10 @@ def build_standalone(
             # Only compile tree-sitter-languages with hashes
             requirements = ["tree-sitter-languages"]
         else:
+            # Use correct PyPI package based on variant
+            package_name = "aider-ce" if variant == "aider-ce" else "aider-chat"
             requirements = [
-                f"aider-chat=={aider_version}",
+                f"{package_name}=={aider_version}",
                 "tree-sitter-languages",
             ]
         requirements_in.write_text("\n".join(requirements) + "\n", encoding="utf-8")
@@ -164,6 +167,12 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="Path to local aider source (for main branch builds)",
     )
+    parser.add_argument(
+        "--variant",
+        choices=["aider-chat", "aider-ce"],
+        default="aider-chat",
+        help="Which aider variant to build (default: aider-chat)",
+    )
     args = parser.parse_args(argv)
 
     metadata = build_standalone(
@@ -171,9 +180,11 @@ def main(argv: list[str] | None = None) -> int:
         args.build_number,
         args.output_dir,
         aider_source_path=args.aider_source_path,
+        variant=args.variant,
     )
 
     manifest = {
+        "variant": args.variant,
         "aider_version": args.aider_version,
         "build_number": args.build_number,
         "artifact_path": metadata["artifact"],

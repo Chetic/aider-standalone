@@ -10,28 +10,33 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict
 
-PYPI_URL = "https://pypi.org/pypi/aider-chat/json"
+PYPI_URLS = {
+    "aider-chat": "https://pypi.org/pypi/aider-chat/json",
+    "aider-ce": "https://pypi.org/pypi/aider-ce/json",
+}
+DEFAULT_VARIANT = "aider-chat"
 
 
-def fetch_release_data() -> Dict[str, Any]:
-    req = urllib.request.Request(PYPI_URL)
+def fetch_release_data(variant: str = DEFAULT_VARIANT) -> Dict[str, Any]:
+    url = PYPI_URLS.get(variant, PYPI_URLS[DEFAULT_VARIANT])
+    req = urllib.request.Request(url)
     with urllib.request.urlopen(req) as resp:  # type: ignore[no-untyped-call]
         return json.loads(resp.read().decode("utf-8"))
 
 
-def resolve_version(requested: str | None) -> str:
-    data = fetch_release_data()
+def resolve_version(requested: str | None, variant: str = DEFAULT_VARIANT) -> str:
+    data = fetch_release_data(variant)
     if requested:
         if requested not in data.get("releases", {}):
             available = sorted(data.get("releases", {}).keys(), reverse=True)
             raise SystemExit(
-                f"Requested aider version '{requested}' was not found on PyPI. "
+                f"Requested {variant} version '{requested}' was not found on PyPI. "
                 f"Available versions (newest first): {', '.join(available[:20])}"
             )
         return requested
     version = data.get("info", {}).get("version")
     if not version:
-        raise SystemExit("Unable to determine latest aider release from PyPI response")
+        raise SystemExit(f"Unable to determine latest {variant} release from PyPI response")
     return version
 
 
@@ -39,15 +44,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--requested", help="Explicit aider version to use", default=None)
     parser.add_argument(
+        "--variant",
+        choices=["aider-chat", "aider-ce"],
+        default="aider-chat",
+        help="Which aider variant to query (default: aider-chat)",
+    )
+    parser.add_argument(
         "--github-output",
         help="File path provided by GitHub Actions for setting outputs",
     )
     args = parser.parse_args(argv)
 
     try:
-        version = resolve_version(args.requested)
+        version = resolve_version(args.requested, args.variant)
     except urllib.error.URLError as exc:  # pragma: no cover - network failure
-        raise SystemExit(f"Failed to query PyPI for aider releases: {exc}")
+        raise SystemExit(f"Failed to query PyPI for {args.variant} releases: {exc}")
 
     print(version)
     if args.github_output:

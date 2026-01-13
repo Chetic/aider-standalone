@@ -15,19 +15,38 @@ from datetime import datetime, timezone
 from typing import Dict, Iterable, Optional
 
 API_BASE = "https://api.github.com"
-RELEASE_TAG_TEMPLATE_PYPI = "standalone-v{aider_version}-build{build_number}"
-RELEASE_TAG_TEMPLATE_MAIN = "standalone-main-{date}-{commit_hash}-build{build_number}"
+DEFAULT_VARIANT = "aider-chat"
+
+RELEASE_TAG_TEMPLATES = {
+    "aider-chat": {
+        "pypi": "standalone-v{aider_version}-build{build_number}",
+        "main": "standalone-main-{date}-{commit_hash}-build{build_number}",
+    },
+    "aider-ce": {
+        "pypi": "standalone-ce-v{aider_version}-build{build_number}",
+        "main": "standalone-ce-main-{date}-{commit_hash}-build{build_number}",
+    },
+}
+
+RE_RELEASE_TAGS = {
+    "aider-chat": {
+        "pypi": re.compile(r"^standalone-v(?P<version>[^-]+)-build(?P<build>\d+)$"),
+        "main": re.compile(
+            r"^standalone-main-(?P<date>\d{8})-(?P<commit>[a-f0-9]+)-build(?P<build>\d+)$"
+        ),
+    },
+    "aider-ce": {
+        "pypi": re.compile(r"^standalone-ce-v(?P<version>[^-]+)-build(?P<build>\d+)$"),
+        "main": re.compile(
+            r"^standalone-ce-main-(?P<date>\d{8})-(?P<commit>[a-f0-9]+)-build(?P<build>\d+)$"
+        ),
+    },
+}
 
 
 @dataclass
 class ReleaseInfo:
     build_number: int
-
-
-RE_RELEASE_TAG_PYPI = re.compile(r"^standalone-v(?P<version>[^-]+)-build(?P<build>\d+)$")
-RE_RELEASE_TAG_MAIN = re.compile(
-    r"^standalone-main-(?P<date>\d{8})-(?P<commit>[a-f0-9]+)-build(?P<build>\d+)$"
-)
 
 
 def fetch_releases(repo: str, token: str) -> Iterable[Dict[str, object]]:
@@ -47,22 +66,21 @@ def next_build_number(
     source_type: str = "pypi",
     date_str: str | None = None,
     commit_hash: str | None = None,
+    variant: str = DEFAULT_VARIANT,
 ) -> int:
     max_build = 0
+    pattern = RE_RELEASE_TAGS[variant][source_type]
     for release in releases:
         tag_name = release.get("tag_name") if isinstance(release, dict) else None
         if not isinstance(tag_name, str):
             continue
+        match = pattern.match(tag_name)
+        if not match:
+            continue
         if source_type == "main":
-            match = RE_RELEASE_TAG_MAIN.match(tag_name)
-            if not match:
-                continue
             if match.group("date") != date_str or match.group("commit") != commit_hash:
                 continue
         else:
-            match = RE_RELEASE_TAG_PYPI.match(tag_name)
-            if not match:
-                continue
             if match.group("version") != aider_version:
                 continue
         build_number = int(match.group("build"))
@@ -76,18 +94,27 @@ def build_metadata(
     source_type: str = "pypi",
     date_str: str | None = None,
     commit_hash: str | None = None,
+    variant: str = DEFAULT_VARIANT,
 ) -> Dict[str, object]:
+    template = RELEASE_TAG_TEMPLATES[variant][source_type]
     if source_type == "main":
-        tag_name = RELEASE_TAG_TEMPLATE_MAIN.format(
+        tag_name = template.format(
             date=date_str, commit_hash=commit_hash, build_number=build_number
         )
-        artifact_name = f"aider-main-{date_str}-{commit_hash}-build{build_number}"
+        if variant == "aider-ce":
+            artifact_name = f"aider-ce-main-{date_str}-{commit_hash}-build{build_number}"
+        else:
+            artifact_name = f"aider-main-{date_str}-{commit_hash}-build{build_number}"
     else:
-        tag_name = RELEASE_TAG_TEMPLATE_PYPI.format(
+        tag_name = template.format(
             aider_version=aider_version, build_number=build_number
         )
-        artifact_name = f"aider-{aider_version}-build{build_number}"
+        if variant == "aider-ce":
+            artifact_name = f"aider-ce-{aider_version}-build{build_number}"
+        else:
+            artifact_name = f"aider-{aider_version}-build{build_number}"
     return {
+        "variant": variant,
         "aider_version": aider_version,
         "build_number": build_number,
         "tag_name": tag_name,
@@ -122,6 +149,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--date",
         help="Build date in YYYYMMDD format (required for main branch builds)",
     )
+    parser.add_argument(
+        "--variant",
+        choices=["aider-chat", "aider-ce"],
+        default="aider-chat",
+        help="Which aider variant to build (default: aider-chat)",
+    )
     args = parser.parse_args(argv)
 
     if args.source_type == "main" and (not args.commit_hash or not args.date):
@@ -145,6 +178,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             source_type=args.source_type,
             date_str=args.date,
             commit_hash=args.commit_hash,
+            variant=args.variant,
         )
 
     metadata = build_metadata(
@@ -153,6 +187,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         source_type=args.source_type,
         date_str=args.date,
         commit_hash=args.commit_hash,
+        variant=args.variant,
     )
 
     with open(args.output, "w", encoding="utf-8") as handle:
